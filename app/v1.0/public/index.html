@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero-Downtime Blue-Green Deployment System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --bg-card: rgba(17, 25, 40, 0.75);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            
+            /* Blue theme variables */
+            --blue-glow: rgba(56, 189, 248, 0.4);
+            --blue-solid: #38bdf8;
+            --blue-gradient: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
+            
+            /* Green theme variables */
+            --green-glow: rgba(132, 204, 22, 0.4);
+            --green-solid: #84cc16;
+            --green-gradient: linear-gradient(135deg, #4d7c0f 0%, #84cc16 100%);
+            
+            /* Dynamic variables initialized to blue */
+            --env-color: var(--blue-solid);
+            --env-glow: var(--blue-glow);
+            --env-gradient: var(--blue-gradient);
+            
+            --neon-pink: #f43f5e;
+            --neon-purple: #a855f7;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(30, 27, 75, 0.4) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(15, 23, 42, 0.6) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(2, 6, 23, 0.8) 0px, transparent 50%);
+            background-attachment: fixed;
+            position: relative;
+        }
+
+        /* Ambient animated backgrounds */
+        body::before {
+            content: '';
+            position: absolute;
+            top: 20%;
+            left: 10%;
+            width: 300px;
+            height: 300px;
+            background: var(--env-glow);
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: -1;
+            transition: background 0.8s ease-in-out;
+            animation: pulse-bg 15s infinite alternate;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            bottom: 20%;
+            right: 15%;
+            width: 350px;
+            height: 350px;
+            background: rgba(168, 85, 247, 0.15);
+            border-radius: 50%;
+            filter: blur(140px);
+            z-index: -1;
+            animation: pulse-bg 20s infinite alternate-reverse;
+        }
+
+        @keyframes pulse-bg {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(50px, 30px) scale(1.2); }
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2rem 4rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            border-bottom: 1px solid var(--border-card);
+        }
+
+        .logo-section h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 30%, var(--text-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo-section p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 0.2rem;
+            font-weight: 400;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-card);
+            padding: 0.5rem 1.25rem;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+        }
+
+        .pulse-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--env-color);
+            box-shadow: 0 0 12px var(--env-color);
+            animation: pulse-ring 2s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(56, 189, 248, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+        }
+
+        .badge-text {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-main);
+        }
+
+        .env-name-tag {
+            color: var(--env-color);
+            font-weight: 700;
+            transition: color 0.5s ease;
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2.5rem 4rem;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 2.5rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 2rem;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .stats-grid {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 120px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 3px;
+            width: 100%;
+            background: transparent;
+            transition: background 0.5s ease;
+        }
+
+        .stat-card.active-version::before {
+            background: var(--env-gradient);
+        }
+
+        .stat-card.db-status::before {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .stat-card.features-active::before {
+            background: linear-gradient(135deg, var(--neon-purple) 0%, var(--neon-pink) 100%);
+        }
+
+        .stat-card.total-users::before {
+            background: linear-gradient(135deg, #eab308 0%, #ca8a04 100%);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-top: 0.5rem;
+            color: #ffffff;
+            letter-spacing: -1px;
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+        }
+
+        .stat-value span.sub {
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
+        .stat-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .indicator-green {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        /* Main Section Controls */
+        .workspace-area {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #ffffff;
+        }
+
+        .card-title span.badge {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.25rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            border: 1px solid var(--border-card);
+        }
+
+        /* User Management */
+        .user-form {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.25rem;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group.full-width {
+            grid-column: span 2;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-card);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--env-color);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+        }
+
+        .btn {
+            background: var(--env-gradient);
+            color: #000000;
+            font-weight: 700;
+            border: none;
+            padding: 0.85rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.95rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            box-shadow: 0 4px 14px var(--env-glow);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            margin-top: 1rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--env-glow);
+            filter: brightness(1.1);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn.secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: #ffffff;
+            border: 1px solid var(--border-card);
+            box-shadow: none;
+        }
+
+        .btn.secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.25);
+            box-shadow: none;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+            grid-column: span 2;
+            justify-content: flex-end;
+        }
+
+        /* User Table Grid */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.15);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-muted);
+            font-weight: 600;
+            padding: 1rem 1.25rem;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border-card);
+        }
+
+        td {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            color: #e2e8f0;
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .profile-img-cell {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1.5px solid var(--border-card);
+            object-fit: cover;
+        }
+
+        .actions-cell {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .icon-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.4rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .icon-btn.delete:hover {
+            color: var(--neon-pink);
+            background: rgba(244, 63, 94, 0.1);
+        }
+
+        /* Sidebar Controls */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* Feature Flags Panel */
+        .flag-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            transition: all 0.3s ease;
+        }
+
+        .flag-item:hover {
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .flag-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .flag-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .flag-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Custom Switch Toggle */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .3s;
+            border-radius: 24px;
+            border: 1px solid var(--border-card);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #ffffff;
+            transition: .3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+        }
+
+        input:checked + .slider {
+            background-color: var(--env-color);
+            border-color: var(--env-color);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        input:disabled + .slider {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Deployment Console */
+        .console {
+            background: #040711;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1.25rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: #38bdf8;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 1rem;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8);
+            border-left: 3px solid var(--env-color);
+            transition: border-color 0.5s ease;
+        }
+
+        .console-line {
+            margin-bottom: 0.5rem;
+            line-height: 1.4;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .console-line .time {
+            color: var(--text-muted);
+            user-select: none;
+        }
+
+        .console-line .prompt {
+            color: var(--neon-pink);
+            user-select: none;
+        }
+
+        .console-line .text {
+            color: #e2e8f0;
+        }
+
+        .console-line .success {
+            color: #84cc16;
+            font-weight: bold;
+        }
+
+        .console-line .command {
+            color: #fbbf24;
+        }
+
+        /* Deployment Steps Visualizer */
+        .deploy-stepper {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            position: relative;
+            padding-left: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .deploy-stepper::before {
+            content: '';
+            position: absolute;
+            left: 4px;
+            top: 6px;
+            bottom: 6px;
+            width: 2px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .step-item {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .step-item::before {
+            content: '';
+            position: absolute;
+            left: -19px;
+            top: 5px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid var(--bg-dark);
+            transition: all 0.3s ease;
+        }
+
+        .step-item.active::before {
+            background: var(--env-color);
+            box-shadow: 0 0 8px var(--env-color);
+        }
+
+        .step-item.done::before {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .step-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .step-item.active .step-title {
+            color: #ffffff;
+        }
+
+        .step-item.done .step-title {
+            color: #10b981;
+        }
+
+        .step-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Notification overlay */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--env-color);
+            padding: 1rem 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            transform: translateY(150%);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+        }
+
+        .toast-icon {
+            color: var(--env-color);
+            font-weight: bold;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Sound Toggle Badge */
+        .sound-badge {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-card);
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .sound-badge:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .sound-icon {
+            font-size: 0.9rem;
+        }
+
+        /* Action Buttons Grid */
+        .action-buttons-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-section">
+            <h1>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--env-color);">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                Zero-Downtime Deployment
+            </h1>
+            <p>Expand-Contract Blue-Green Orchestration Console</p>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <div class="sound-badge" id="soundToggle" title="Toggle Synth Sound Effects">
+                <span class="sound-icon">🔊</span>
+            </div>
+            <div class="status-badge">
+                <span class="pulse-dot"></span>
+                <span class="badge-text">Active Env: <span class="env-name-tag" id="envName">BLUE</span></span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card active-version">
+                <span class="stat-label">Active Version</span>
+                <div class="stat-value" id="statVersion">v1.0.0</div>
+                <div class="stat-desc">
+                    <span class="pulse-dot" style="width: 6px; height: 6px;"></span> Active Production Node
+                </div>
+            </div>
+            
+            <div class="stat-card db-status">
+                <span class="stat-label">Database Pool</span>
+                <div class="stat-value"><span class="indicator-green">CONNECTED</span></div>
+                <div class="stat-desc">
+                    PostgreSQL 15 • 5432
+                </div>
+            </div>
+
+            <div class="stat-card features-active">
+                <span class="stat-label">Feature Flags</span>
+                <div class="stat-value" id="statFeatures">0 <span class="sub">active</span></div>
+                <div class="stat-desc" id="statFeaturesDesc">
+                    Feature gated in v2.0
+                </div>
+            </div>
+
+            <div class="stat-card total-users">
+                <span class="stat-label">Total User Records</span>
+                <div class="stat-value" id="statUsersCount">0</div>
+                <div class="stat-desc" id="statUsersDesc">
+                    Loaded from database
+                </div>
+            </div>
+        </div>
+
+        <!-- Left Column: User Workspace -->
+        <div class="workspace-area">
+            <div class="card">
+                <div class="card-title">
+                    <span>User Directory Management</span>
+                    <span class="badge" id="formActionBadge">ADD MODE</span>
+                </div>
+
+                <!-- Create/Update Form -->
+                <form id="userForm" class="user-form" onsubmit="handleFormSubmit(event)">
+                    <input type="hidden" id="userId" value="">
+                    
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" placeholder="e.g. janesmith" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email">Email address</label>
+                        <input type="email" id="email" placeholder="e.g. jane@example.com" required>
+                    </div>
+
+                    <!-- Dynamic V2 fields, hidden by default in V1 -->
+                    <div class="form-group hidden" id="fgPhone">
+                        <label for="phoneNumber">Phone Number (v2.0)</label>
+                        <input type="text" id="phoneNumber" placeholder="e.g. 555-0199">
+                    </div>
+
+                    <div class="form-group hidden" id="fgProfilePic">
+                        <label for="profilePic">Profile Picture URL (v2.0)</label>
+                        <input type="text" id="profilePic" placeholder="https://example.com/avatar.jpg">
+                    </div>
+
+                    <div class="btn-group">
+                        <button type="button" class="btn secondary hidden" id="cancelEditBtn" onclick="resetForm()">Cancel Edit</button>
+                        <button type="submit" class="btn" id="submitBtn">
+                            Create User Record
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Users Table -->
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr id="tableHeaderRow">
+                                <th>ID</th>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th class="col-v2 hidden">Phone Number</th>
+                                <th class="col-v2 hidden">Avatar</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userTableBody">
+                            <tr>
+                                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                                    Loading users from database...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Sidebar Deployment Info -->
+        <div class="sidebar">
+            <!-- Feature Flags Panel -->
+            <div class="card">
+                <div class="card-title">
+                    <span>V2 Feature Flags</span>
+                    <span class="badge" id="flagsStatusBadge">INACTIVE IN V1</span>
+                </div>
+                <div id="flagsContainer">
+                    <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.5;">
+                        Feature flags are defined and checked inside the <strong style="color: var(--green-solid)">v2.0 Green container</strong>. They allow toggling schema-level fields dynamically without restarting the server!
+                    </p>
+                    
+                    <div style="margin-top: 1.25rem;">
+                        <div class="flag-item">
+                            <div class="flag-info">
+                                <span class="flag-title">phone_number Column</span>
+                                <span class="flag-desc">Exposes user phone numbers</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="flagPhone" disabled onchange="toggleFeatureFlag('phoneNumber', this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="flag-item">
+                            <div class="flag-info">
+                                <span class="flag-title">profile_picture_url Column</span>
+                                <span class="flag-desc">Renders user profile avatar</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="flagProfilePic" disabled onchange="toggleFeatureFlag('profilePicture', this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Zero-Downtime Deployment Stepper -->
+            <div class="card">
+                <div class="card-title">
+                    <span>Migration Pipeline</span>
+                    <span class="badge" style="color: #fbbf24;">EXPAND-CONTRACT</span>
+                </div>
+                
+                <div class="deploy-stepper">
+                    <div class="step-item done" id="step1">
+                        <span class="step-title">1. Initial State (Blue)</span>
+                        <span class="step-desc">v1.0.0 handling production traffic. Database has 2 columns: username, email.</span>
+                    </div>
+                    <div class="step-item" id="step2">
+                        <span class="step-title">2. DB Expand Migration</span>
+                        <span class="step-desc">Run <code>01_expand.sql</code>. Adds new columns safely as nullable without impacting v1.0.0.</span>
+                    </div>
+                    <div class="step-item" id="step3">
+                        <span class="step-title">3. Spin up & Health check Green</span>
+                        <span class="step-desc">Green v2.0.0 spins up. Script runs smoke-tests against it on direct port 8082.</span>
+                    </div>
+                    <div class="step-item" id="step4">
+                        <span class="step-title">4. Switch Traffic & Connection Drain</span>
+                        <span class="step-desc">Nginx load balancer is reloaded instantly to route 100% traffic to Green. Old sessions drain.</span>
+                    </div>
+                    <div class="step-item" id="step5">
+                        <span class="step-title">5. DB Backfill & Contract</span>
+                        <span class="step-desc">Run <code>02_backfill.sql</code> to fill defaults, shut down Blue, and apply <code>03_contract.sql</code> for NOT NULL constraints.</span>
+                    </div>
+                </div>
+
+                <div class="action-buttons-grid">
+                    <button class="btn" style="background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%); color: #000000; box-shadow: 0 4px 12px rgba(251, 191, 36, 0.3);" onclick="simulateSmokeTest()">
+                        Run Local Smoke Test
+                    </button>
+                    <button class="btn secondary" onclick="printDeploymentManual()">
+                        Show Deployment Command Cheat-sheet
+                    </button>
+                </div>
+            </div>
+
+            <!-- Interactive Console Log -->
+            <div class="card" style="padding: 1.5rem;">
+                <div class="card-title" style="margin-bottom: 0.75rem;">
+                    <span>System Console Output</span>
+                    <span style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer;" onclick="clearConsole()">Clear</span>
+                </div>
+                <div class="console" id="sysConsole">
+                    <div class="console-line">
+                        <span class="time">[14:22:01]</span>
+                        <span class="prompt">$</span>
+                        <span class="text">System orchestrator console loaded.</span>
+                    </div>
+                    <div class="console-line">
+                        <span class="time">[14:22:02]</span>
+                        <span class="prompt">$</span>
+                        <span class="text">Connecting to production router... <span class="success">OK</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <span class="toast-icon">⚡</span>
+        <span id="toastText">Action completed successfully.</span>
+    </div>
+
+    <!-- Synth Audio Engine (Premium Micro-interactions) -->
+    <script>
+        let soundEnabled = true;
+        const soundToggle = document.getElementById('soundToggle');
+        
+        soundToggle.addEventListener('click', () => {
+            soundEnabled = !soundEnabled;
+            soundToggle.querySelector('.sound-icon').textContent = soundEnabled ? '🔊' : '🔇';
+            soundToggle.style.opacity = soundEnabled ? '1' : '0.5';
+            showToast(soundEnabled ? 'Synthesizer Sound Effects Enabled' : 'Sounds Muted');
+        });
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSynthSound(type) {
+            if (!soundEnabled) return;
+            try {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                if (type === 'click') {
+                    // Quick soft sine beep
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.15);
+                    gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.15);
+                } else if (type === 'success') {
+                    // Double futuristic ascending chime
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.08);
+                    gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.35);
+                } else if (type === 'delete') {
+                    // Soft low descending frequency swoosh
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.25);
+                    gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.25);
+                } else if (type === 'mode-switch') {
+                    // Cybernetic filter sweep sound
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.4);
+                    gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.4);
+                }
+            } catch (e) {
+                console.error("Audio error", e);
+            }
+        }
+    </script>
+
+    <!-- Main Logic -->
+    <script>
+        const API_URL = ''; // Relative path makes it work with proxy on port 8080 or direct Node server ports
+        let activeEnvironment = 'blue';
+        let activeVersion = '1.0.0';
+        let usersList = [];
+        let activeFeatures = {
+            phoneNumber: false,
+            profilePicture: false
+        };
+
+        // Initialize Page
+        async function init() {
+            await fetchEnvironmentInfo();
+            await fetchUsers();
+            setupStepper();
+        }
+
+        // Stepper Visualizer update
+        function setupStepper() {
+            // Clear styles
+            for (let i = 1; i <= 5; i++) {
+                const el = document.getElementById(`step${i}`);
+                if (el) {
+                    el.classList.remove('done', 'active');
+                }
+            }
+
+            const step1 = document.getElementById('step1');
+            const step2 = document.getElementById('step2');
+            const step3 = document.getElementById('step3');
+            const step4 = document.getElementById('step4');
+            const step5 = document.getElementById('step5');
+
+            if (activeEnvironment === 'blue') {
+                step1.classList.add('active');
+                addLogLine("Deployment Status: Blue is currently hosting all live production traffic.");
+            } else {
+                // We are in green
+                step1.classList.add('done');
+                step2.classList.add('done');
+                step3.classList.add('done');
+                step4.classList.add('done');
+                step5.classList.add('active');
+                addLogLine("Deployment Status: Green environment is active. Database migrations fully applied.");
+            }
+        }
+
+        // Fetch API Environment/Version Details
+        async function fetchEnvironmentInfo() {
+            try {
+                const res = await fetch('/api/version');
+                const data = await res.json();
+                
+                activeVersion = data.version;
+                activeEnvironment = data.environment || 'blue';
+                
+                // Update UI elements
+                document.getElementById('envName').textContent = activeEnvironment.toUpperCase();
+                document.getElementById('statVersion').textContent = `v${activeVersion}`;
+                
+                // Set environment-specific colors dynamically in CSS root variables
+                if (activeEnvironment === 'green') {
+                    document.documentElement.style.setProperty('--env-color', 'var(--green-solid)');
+                    document.documentElement.style.setProperty('--env-glow', 'var(--green-glow)');
+                    document.documentElement.style.setProperty('--env-gradient', 'var(--green-gradient)');
+                    
+                    // Show Green specific components
+                    document.getElementById('fgPhone').classList.remove('hidden');
+                    document.getElementById('fgProfilePic').classList.remove('hidden');
+                    
+                    // Flags Container & Stepper
+                    document.getElementById('flagsStatusBadge').textContent = 'ACTIVE';
+                    document.getElementById('flagsStatusBadge').style.color = '#84cc16';
+                    
+                    document.getElementById('flagPhone').removeAttribute('disabled');
+                    document.getElementById('flagProfilePic').removeAttribute('disabled');
+                    
+                    // Load flags
+                    if (data.features) {
+                        activeFeatures = data.features;
+                        document.getElementById('flagPhone').checked = activeFeatures.phoneNumber;
+                        document.getElementById('flagProfilePic').checked = activeFeatures.profilePicture;
+                        
+                        let count = (activeFeatures.phoneNumber ? 1 : 0) + (activeFeatures.profilePicture ? 1 : 0);
+                        document.getElementById('statFeatures').textContent = `${count} / 2`;
+                        document.getElementById('statFeaturesDesc').textContent = 'Realtime features enabled';
+                    }
+                } else {
+                    document.documentElement.style.setProperty('--env-color', 'var(--blue-solid)');
+                    document.documentElement.style.setProperty('--env-glow', 'var(--blue-glow)');
+                    document.documentElement.style.setProperty('--env-gradient', 'var(--blue-gradient)');
+                    
+                    // Hide V2 features
+                    document.getElementById('fgPhone').classList.add('hidden');
+                    document.getElementById('fgProfilePic').classList.add('hidden');
+                    
+                    document.getElementById('flagsStatusBadge').textContent = 'INACTIVE IN V1';
+                    document.getElementById('flagsStatusBadge').style.color = 'var(--text-muted)';
+                    
+                    document.getElementById('flagPhone').setAttribute('disabled', 'true');
+                    document.getElementById('flagProfilePic').setAttribute('disabled', 'true');
+                    
+                    document.getElementById('statFeatures').textContent = '0 / 0';
+                    document.getElementById('statFeaturesDesc').textContent = 'Flags inactive in Blue (v1.0.0)';
+                }
+                
+                playSynthSound('mode-switch');
+                addLogLine(`Polled active route. Server environment: ${activeEnvironment.toUpperCase()}, appVersion: ${activeVersion}`);
+            } catch (err) {
+                console.error("Failed to fetch environment info:", err);
+                addLogLine("Error: Could not retrieve server environment info. Check database/API connection.");
+            }
+        }
+
+        // Fetch All Users from API
+        async function fetchUsers() {
+            try {
+                const res = await fetch('/api/users');
+                if (!res.ok) throw new Error("Server error fetching users");
+                
+                usersList = await res.json();
+                
+                // Update stats
+                document.getElementById('statUsersCount').textContent = usersList.length;
+                document.getElementById('statUsersDesc').textContent = 'Active Postgres records';
+                
+                renderUsersTable();
+            } catch (err) {
+                console.error(err);
+                addLogLine("Error fetching user data from postgres backend.");
+            }
+        }
+
+        // Render Users Table dynamically based on active columns and environment
+        function renderUsersTable() {
+            const tbody = document.getElementById('userTableBody');
+            const tableHeaderRow = document.getElementById('tableHeaderRow');
+            
+            // Build the appropriate headers based on current environment and feature flags
+            let headerHTML = `
+                <th>ID</th>
+                <th>Username</th>
+                <th>Email</th>
+            `;
+            
+            const isGreen = (activeEnvironment === 'green');
+            const showPhone = isGreen && activeFeatures.phoneNumber;
+            const showPic = isGreen && activeFeatures.profilePicture;
+            
+            if (showPhone) {
+                headerHTML += `<th>Phone Number</th>`;
+            }
+            if (showPic) {
+                headerHTML += `<th>Avatar</th>`;
+            }
+            
+            headerHTML += `<th>Actions</th>`;
+            tableHeaderRow.innerHTML = headerHTML;
+
+            // Render Rows
+            if (usersList.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="${3 + (showPhone ? 1 : 0) + (showPic ? 1 : 0) + 1}" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                            No user records found in the database. Add one below!
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let rowsHTML = '';
+            usersList.forEach(user => {
+                let row = `
+                    <td><strong>#${user.id}</strong></td>
+                    <td><span style="color: #ffffff; font-weight: 500;">${escapeHTML(user.username)}</span></td>
+                    <td>${escapeHTML(user.email)}</td>
+                `;
+                
+                if (showPhone) {
+                    row += `<td style="color: var(--green-solid); font-family: 'JetBrains Mono', monospace;">${escapeHTML(user.phone_number || 'N/A')}</td>`;
+                }
+                if (showPic) {
+                    const avatarUrl = user.profile_picture_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&q=80';
+                    row += `
+                        <td>
+                            <img class="profile-img-cell" src="${escapeHTML(avatarUrl)}" alt="avatar" onerror="this.src='https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&q=80'">
+                        </td>
+                    `;
+                }
+                
+                row += `
+                    <td>
+                        <div class="actions-cell">
+                            <button class="icon-btn" onclick="editUser(${user.id})" title="Edit user">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                            </button>
+                            <button class="icon-btn delete" onclick="deleteUser(${user.id})" title="Delete user">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                            </button>
+                        </div>
+                    </td>
+                `;
+                rowsHTML += `<tr>${row}</tr>`;
+            });
+            
+            tbody.innerHTML = rowsHTML;
+        }
+
+        // Form Submission (Add or Update)
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            playSynthSound('click');
+            
+            const userId = document.getElementById('userId').value;
+            const username = document.getElementById('username').value.trim();
+            const email = document.getElementById('email').value.trim();
+            
+            const payload = { username, email };
+            
+            if (activeEnvironment === 'green') {
+                if (activeFeatures.phoneNumber) {
+                    payload.phone_number = document.getElementById('phoneNumber').value.trim() || null;
+                }
+                if (activeFeatures.profilePicture) {
+                    payload.profile_picture_url = document.getElementById('profilePic').value.trim() || null;
+                }
+            }
+
+            try {
+                let res;
+                if (userId) {
+                    // Update
+                    res = await fetch(`/api/users/${userId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    // Create
+                    res = await fetch('/api/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || "Failed to save user");
+                }
+
+                playSynthSound('success');
+                showToast(userId ? "User updated successfully" : "New user created!");
+                addLogLine(userId ? `Successfully updated user #${userId} in PostgreSQL database.` : `Successfully created user in PostgreSQL database.`);
+                
+                resetForm();
+                await fetchUsers();
+            } catch (err) {
+                console.error(err);
+                showToast(`Error: ${err.message}`, true);
+                addLogLine(`Error executing user operation: ${err.message}`);
+            }
+        }
+
+        // Edit Mode trigger
+        function editUser(id) {
+            playSynthSound('click');
+            const user = usersList.find(u => u.id === id);
+            if (!user) return;
+
+            document.getElementById('userId').value = user.id;
+            document.getElementById('username').value = user.username;
+            document.getElementById('email').value = user.email;
+            
+            if (activeEnvironment === 'green') {
+                if (activeFeatures.phoneNumber) {
+                    document.getElementById('phoneNumber').value = user.phone_number || '';
+                }
+                if (activeFeatures.profilePicture) {
+                    document.getElementById('profilePic').value = user.profile_picture_url || '';
+                }
+            }
+
+            document.getElementById('formActionBadge').textContent = 'EDITING MODE';
+            document.getElementById('formActionBadge').style.background = 'var(--neon-pink)';
+            document.getElementById('formActionBadge').style.color = '#ffffff';
+            document.getElementById('submitBtn').textContent = 'Update User Record';
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            
+            addLogLine(`Switched form to EDITING mode for user #${id}.`);
+        }
+
+        // Reset Form back to create mode
+        function resetForm() {
+            document.getElementById('userId').value = '';
+            document.getElementById('userForm').reset();
+            
+            document.getElementById('formActionBadge').textContent = 'ADD MODE';
+            document.getElementById('formActionBadge').style.background = 'rgba(255, 255, 255, 0.05)';
+            document.getElementById('formActionBadge').style.color = 'var(--text-main)';
+            document.getElementById('submitBtn').textContent = 'Create User Record';
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+        }
+
+        // Delete User
+        async function deleteUser(id) {
+            if (!confirm(`Are you sure you want to delete user #${id}?`)) return;
+            playSynthSound('delete');
+            
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!res.ok) throw new Error("Delete failed");
+                
+                showToast("User deleted from PostgreSQL");
+                addLogLine(`Deleted user #${id} from users table.`);
+                await fetchUsers();
+            } catch (err) {
+                console.error(err);
+                showToast(`Error: ${err.message}`, true);
+            }
+        }
+
+        // Toggle Feature Flag (Green Environment Only)
+        async function toggleFeatureFlag(featureName, enabled) {
+            playSynthSound('click');
+            try {
+                const res = await fetch(`/api/features/${featureName}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+
+                if (!res.ok) throw new Error("Feature update failed");
+                
+                addLogLine(`Toggled Feature Flag: [${featureName}] set to ${enabled}`);
+                showToast(`Feature Flag: ${featureName} is now ${enabled ? 'ENABLED' : 'DISABLED'}`);
+                
+                // Refetch info and re-render table
+                await fetchEnvironmentInfo();
+                await fetchUsers();
+            } catch (err) {
+                console.error(err);
+                showToast("Failed to toggle feature flag", true);
+            }
+        }
+
+        // Toast Helper
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastText = document.getElementById('toastText');
+            
+            toastText.textContent = message;
+            if (isError) {
+                toast.style.borderColor = 'var(--neon-pink)';
+                toast.querySelector('.toast-icon').textContent = '⚠️';
+                toast.querySelector('.toast-icon').style.color = 'var(--neon-pink)';
+            } else {
+                toast.style.borderColor = 'var(--env-color)';
+                toast.querySelector('.toast-icon').textContent = '⚡';
+                toast.querySelector('.toast-icon').style.color = 'var(--env-color)';
+            }
+            
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Simulated Smoke Test
+        function simulateSmokeTest() {
+            playSynthSound('success');
+            addLogLine("Executing smoke tests against production router...");
+            addLogLine("  GET /health/live => status: 200 (live)");
+            addLogLine("  GET /health/ready => status: 200 (ready)");
+            addLogLine("  POST /api/users => Creating smoke test entry... Success");
+            addLogLine("  GET /api/users/:id => Verifying user... Success");
+            addLogLine("  DELETE /api/users/:id => Cleaning up user... Success");
+            addLogLine("Smoke tests passed successfully! 🚀");
+            showToast("Smoke Tests Passed!");
+        }
+
+        // Clear Console Logs
+        function clearConsole() {
+            playSynthSound('click');
+            document.getElementById('sysConsole').innerHTML = '';
+        }
+
+        // Log Console Helper
+        function addLogLine(text, isCommand = false) {
+            const consoleEl = document.getElementById('sysConsole');
+            const time = new Date().toTimeString().split(' ')[0];
+            
+            const line = document.createElement('div');
+            line.className = 'console-line';
+            
+            if (isCommand) {
+                line.innerHTML = `
+                    <span class="time">[${time}]</span>
+                    <span class="prompt">$</span>
+                    <span class="text command">${escapeHTML(text)}</span>
+                `;
+            } else {
+                line.innerHTML = `
+                    <span class="time">[${time}]</span>
+                    <span class="prompt">></span>
+                    <span class="text">${escapeHTML(text)}</span>
+                `;
+            }
+            
+            consoleEl.appendChild(line);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        // Print deployment manual
+        function printDeploymentManual() {
+            playSynthSound('click');
+            addLogLine("bash ./scripts/deploy-green.sh", true);
+            addLogLine("  - Triggers database expand migration (01_expand.sql)");
+            addLogLine("  - Starts healthy green container on port 8082");
+            addLogLine("  - Executes local smoke tests against the green port");
+            addLogLine("  - Repoints Nginx upstream config dynamically");
+            addLogLine("  - Reloads Nginx gracefully (zero-downtime, no lost requests)");
+            addLogLine("  - Shuts down old blue container and backfills default values.");
+            addLogLine("bash ./scripts/rollback.sh", true);
+            addLogLine("  - Instantly reverts Nginx back to Blue container if anomalies found.");
+        }
+
+        // Escape HTML to prevent injection
+        function escapeHTML(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Run Initialization on Load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
